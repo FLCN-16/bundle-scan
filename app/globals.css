@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@plugin "@tailwindcss/typography";
 
 :root {
   --muted: oklch(0.97 0 0);
@@ -204,4 +205,9 @@ body {
 .animate-glow-breathe-slow {
   animation: glow-breathe-slow 5s ease-in-out infinite;
   animation-delay: -2.5s;
+}
+
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
