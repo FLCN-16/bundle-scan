@@ -106,28 +106,39 @@ export function SearchBar({ initialRegistry = "npm" }: { initialRegistry?: Regis
       </div>
 
       <form onSubmit={handleSubmit} className="relative">
-        <div className="relative">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-400 dark:text-slate-500 pointer-events-none" />
-          <input
-            ref={inputRef}
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onFocus={() => suggestions.length > 0 && setOpen(true)}
-            onBlur={() => setTimeout(() => setOpen(false), 150)}
-            onKeyDown={handleKeyDown}
-            placeholder={placeholder}
-            aria-label="Search packages"
-            aria-autocomplete="list"
-            aria-expanded={open}
-            className="w-full h-13 pl-11 pr-24 rounded-2xl border border-black/8 dark:border-white/10 bg-white/90 dark:bg-white/7 backdrop-blur-xl text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-600 text-sm shadow-lg shadow-black/4 dark:shadow-black/20 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-400/60 dark:focus:border-indigo-500/40 transition-all duration-200"
-          />
-          <button
-            type="submit"
-            className="absolute right-2 top-1.75 h-9.5 px-4 rounded-(--radius-search-btn) bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white text-body-sm font-semibold shadow-md shadow-indigo-600/25 transition-all duration-150 hover:shadow-indigo-500/30 hover:shadow-lg"
-          >
-            Search
-          </button>
+        <div className="relative rounded-2xl overflow-hidden p-0.5">
+          {/* Animated conic-gradient border */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div
+              className="aspect-square w-[200%] flex-shrink-0 animate-border-rotate [animation-duration:6s] blur-[3px]"
+              style={{
+                background: "conic-gradient(transparent 52%, rgba(148,163,255,0.5) 63%, rgba(199,182,255,0.95) 73%, rgba(255,255,255,0.85) 76%, rgba(199,182,255,0.95) 79%, rgba(148,163,255,0.5) 89%, transparent 100%)",
+              }}
+            />
+          </div>
+          <div className="relative rounded-[calc(1rem-2px)] bg-white dark:bg-[#16162a]">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-slate-400 dark:text-slate-500 pointer-events-none" />
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => suggestions.length > 0 && setOpen(true)}
+              onBlur={() => setTimeout(() => setOpen(false), 150)}
+              onKeyDown={handleKeyDown}
+              placeholder={placeholder}
+              aria-label="Search packages"
+              aria-autocomplete="list"
+              aria-expanded={open}
+              className="w-full h-13 pl-11 pr-24 rounded-[calc(1rem-2px)] border-0 bg-transparent text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-600 text-sm focus:outline-none transition-all duration-200"
+            />
+            <button
+              type="submit"
+              className="absolute right-2 top-1.75 h-9.5 px-4 rounded-(--radius-search-btn) bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white text-body-sm font-semibold shadow-md shadow-indigo-600/25 transition-all duration-150 hover:shadow-indigo-500/30 hover:shadow-lg"
+            >
+              Search
+            </button>
+          </div>
         </div>
 
         {open && suggestions.length > 0 && (

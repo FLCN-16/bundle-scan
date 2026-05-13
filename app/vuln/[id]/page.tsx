@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 
 import { ExternalLink, Calendar, Tag } from "lucide-react";
+import Markdown from "react-markdown";
 import { BackButton } from "@/app/components/BackButton";
 import type { Severity } from "@/lib/types";
 
@@ -416,8 +417,8 @@ async function VulnContent({
                 <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/15 to-transparent pointer-events-none" />
                 <div className="p-5">
                   <p className="text-label font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4 select-none">Description</p>
-                  <div className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">
-                    {vuln.details}
+                  <div className="prose prose-sm prose-slate dark:prose-invert max-w-none prose-a:text-indigo-600 dark:prose-a:text-indigo-400 prose-a:no-underline hover:prose-a:underline prose-code:before:content-none prose-code:after:content-none prose-code:bg-slate-100 dark:prose-code:bg-white/8 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:font-mono prose-code:text-xs">
+                    <Markdown>{vuln.details}</Markdown>
                   </div>
                 </div>
               </div>
