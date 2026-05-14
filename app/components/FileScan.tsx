@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { Check, AlertCircle, RotateCcw, FileText, ShieldAlert, ShieldCheck, Package, Copy, ClipboardCheck } from "lucide-react";
 import { detectAndParse, type ParsedPackage } from "@/lib/parsers";
 import { fetchSecurity } from "@/lib/actions/security";
-import { fetchPackageSize, type PackageSize } from "@/lib/actions/package-size";
-import type { Advisory, SecurityResult, Severity } from "@/lib/types";
+import { fetchPackageSize } from "@/lib/actions/package-size";
+import type { Advisory, BundleResult, SecurityResult, Severity } from "@/lib/types";
 
 const ECOSYSTEM_MAP: Record<"npm" | "pypi" | "maven", string> = {
   npm: "npm",
@@ -112,12 +112,54 @@ function buildFixCommand(entries: ScanEntry[]): string {
   return lines.join("\n");
 }
 
-interface ScanEntry {
+export interface ScanEntry {
   pkg: ParsedPackage;
   status: "pending" | "scanning" | "done" | "error";
   result?: SecurityResult;
   error?: string;
-  size?: PackageSize | null; // undefined = loading, null = unavailable
+  // undefined = not yet fetched, null = unavailable
+  size?: { min: number; gzip?: number } | null;
+}
+
+export interface SavedScan {
+  filename: string;
+  entries: ScanEntry[];
+  savedAt: number;
+}
+
+async function fetchNpmBundleSize(name: string, version: string): Promise<{ min: number; gzip: number } | null> {
+  try {
+    const res = await fetch("/api/bundle/npm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, version }),
+    });
+    if (!res.ok || !res.body) return null;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let result: { min: number; gzip: number } | null = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split("\n\n");
+      buf = parts.pop() ?? "";
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data: ")) continue;
+        const ev = JSON.parse(line.slice(6)) as
+          | { type: "progress" }
+          | { type: "result"; data: BundleResult | { ok: false } };
+        if (ev.type === "result" && ev.data.ok) {
+          result = { min: (ev.data as BundleResult).minSize, gzip: (ev.data as BundleResult).gzipSize };
+        }
+      }
+    }
+    return result;
+  } catch {
+    return null;
+  }
 }
 
 function topSeverity(advisories: Advisory[]): Severity {
@@ -162,7 +204,10 @@ function ScanRow({ entry }: { entry: ScanEntry }) {
           <span className="font-mono text-xs text-slate-400 dark:text-slate-500">{pkg.version}</span>
           {entry.size != null && (
             <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-white/5 border border-black/5 dark:border-white/6 px-1.5 py-0.5 rounded">
-              {fmtBytes(entry.size.bytes)}
+              {fmtBytes(entry.size.min)}
+              {entry.size.gzip != null && (
+                <span className="opacity-60"> / {fmtBytes(entry.size.gzip)} gz</span>
+              )}
             </span>
           )}
           {entry.size === undefined && entry.status !== "pending" && (
@@ -214,20 +259,29 @@ function ScanRow({ entry }: { entry: ScanEntry }) {
 
 const CONCURRENCY = 4;
 
-export function FileScan({ initialFile }: { initialFile?: { name: string; content: string } }) {
+export function FileScan({
+  initialFile,
+  savedScan,
+  scanId,
+}: {
+  initialFile?: { name: string; content: string };
+  savedScan?: SavedScan;
+  scanId?: string;
+}) {
   const router = useRouter();
-  const [entries, setEntries] = useState<ScanEntry[]>([]);
+  const [entries, setEntries] = useState<ScanEntry[]>(savedScan?.entries ?? []);
   const [scanning, setScanning] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
-  const [filename, setFilename] = useState<string | null>(null);
+  const [filename, setFilename] = useState<string | null>(savedScan?.filename ?? null);
   const [copied, setCopied] = useState(false);
   const hasStarted = useRef(false);
+  const savedToStorage = useRef(!!savedScan);
 
   const updateEntry = useCallback((idx: number, patch: Partial<ScanEntry>) => {
     setEntries((prev) => prev.map((e, i) => (i === idx ? { ...e, ...patch } : e)));
   }, []);
 
-  const updateSize = useCallback((idx: number, size: PackageSize | null) => {
+  const updateSize = useCallback((idx: number, size: { min: number; gzip?: number } | null) => {
     setEntries((prev) => prev.map((e, i) => (i === idx ? { ...e, size } : e)));
   }, []);
 
@@ -258,9 +312,13 @@ export function FileScan({ initialFile }: { initialFile?: { name: string; conten
           updateEntry(idx, { status: "scanning" });
 
           // Size and security fire in parallel per package slot
-          const sizeP = fetchPackageSize(pkg.name, pkg.registry, pkg.version)
-            .then((size) => updateSize(idx, size))
-            .catch(() => updateSize(idx, null));
+          const sizeP = pkg.registry === "npm"
+            ? fetchNpmBundleSize(pkg.name, pkg.version)
+                .then((s) => updateSize(idx, s))
+                .catch(() => updateSize(idx, null))
+            : fetchPackageSize(pkg.name, pkg.registry, pkg.version)
+                .then((s) => updateSize(idx, s ? { min: s.bytes } : null))
+                .catch(() => updateSize(idx, null));
 
           const secP = fetchSecurity(pkg.name, ECOSYSTEM_MAP[pkg.registry], pkg.version)
             .then((result) => updateEntry(idx, { status: "done", result }))
@@ -291,8 +349,27 @@ export function FileScan({ initialFile }: { initialFile?: { name: string; conten
   const clean = entries.filter((e) => e.status === "done" && (e.result?.advisories.length ?? 0) === 0);
   const isComplete = done === entries.length && entries.length > 0;
 
+  useEffect(() => {
+    if (isComplete && scanId && filename && !savedToStorage.current) {
+      savedToStorage.current = true;
+      const payload: SavedScan = { filename, entries, savedAt: Date.now() };
+      // fast local cache for same-browser reloads
+      try {
+        localStorage.setItem(`bundle-scan-result-${scanId}`, JSON.stringify(payload));
+      } catch {}
+      // durable remote store for shareable links
+      fetch("/api/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: scanId, data: payload }),
+      }).catch(() => {});
+    }
+  // entries reference changes each render; only save once isComplete flips true
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isComplete, scanId]);
+
   const totalBytes = useMemo(() => {
-    const sum = entries.reduce((acc, e) => acc + (e.size?.bytes ?? 0), 0);
+    const sum = entries.reduce((acc, e) => acc + (e.size?.min ?? 0), 0);
     return sum > 0 ? sum : null;
   }, [entries]);
 

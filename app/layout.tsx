@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { Package } from "lucide-react";
+import { Package, Heart } from "lucide-react";
 import { VscodeBanner } from "@/app/components/VscodeBanner";
 import { ServiceWorker } from "@/app/components/ServiceWorker";
 import "./globals.css";
@@ -75,6 +75,41 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </header>
 
         {children}
+
+        {/* Footer */}
+        <footer className="border-t border-black/6 dark:border-white/6 px-4 py-6">
+          <div className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-400 dark:text-slate-500">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4">
+              <span>© 2025 Bundle Scan</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="flex gap-4">
+                <a href="https://osv.dev" target="_blank" rel="noreferrer" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">OSV</a>
+                <a href="https://nvd.nist.gov" target="_blank" rel="noreferrer" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">NVD</a>
+                <a href="https://esbuild.github.io" target="_blank" rel="noreferrer" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">esbuild</a>
+              </div>
+              <span className="text-slate-300 dark:text-slate-600">·</span>
+              <div className="flex gap-4">
+                <a href="/privacy" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">Privacy</a>
+                <a href="/terms" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">Terms</a>
+              </div>
+              <span className="text-slate-300 dark:text-slate-600">·</span>
+              <span>
+                Built with{" "}
+                <Heart className="inline size-3 fill-rose-400 text-rose-400 dark:fill-rose-500 dark:text-rose-500" />
+                {" "}by{" "}
+                <a
+                  href="https://thefalcon.dev"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors font-medium"
+                >
+                  thefalcon.dev
+                </a>
+              </span>
+            </div>
+          </div>
+        </footer>
 
       </body>
     </html>
