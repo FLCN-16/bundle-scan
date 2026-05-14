@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
 
   try {
     await put(`package-scans/${id}.json`, JSON.stringify(data), {
-      access: "public",
+      access: "private",
       contentType: "application/json",
       cacheControlMaxAge: 86400,
     });

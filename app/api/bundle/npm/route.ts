@@ -32,9 +32,11 @@ export async function POST(request: NextRequest) {
         const result = await computeBundle(name, version, (phase) =>
           send({ type: "progress", phase })
         );
+        if (!result.ok) console.error("[bundle-scan] computeBundle returned error:", result.error, result.detail);
         send({ type: "result", data: result });
-      } catch {
-        send({ type: "result", data: { ok: false, error: "BUNDLE_FAILED", detail: "Internal error" } });
+      } catch (err) {
+        console.error("[bundle-scan] computeBundle threw:", err);
+        send({ type: "result", data: { ok: false, error: "BUNDLE_FAILED", detail: String(err) } });
       } finally {
         controller.close();
       }

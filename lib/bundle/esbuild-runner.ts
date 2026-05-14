@@ -15,13 +15,13 @@ const NPM_BIN = path.join(path.dirname(process.execPath), "npm");
 function spawnAsync(
   cmd: string,
   args: string[],
-  opts: { cwd: string; timeout: number }
+  opts: { cwd: string; timeout: number; extraEnv?: Record<string, string> }
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd, args, {
       cwd: opts.cwd,
       stdio: "pipe",
-      env: { ...process.env, npm_config_fund: "false", npm_config_audit: "false" },
+      env: { ...process.env, npm_config_fund: "false", npm_config_audit: "false", ...opts.extraEnv },
     });
 
     const timer = setTimeout(() => {
@@ -59,10 +59,21 @@ export async function computeBundle(
       await spawnAsync(
         NPM_BIN,
         ["install", pkg, "--no-save", "--omit=dev", "--prefer-offline", "--no-package-lock", "--ignore-scripts"],
-        { cwd: tmpDir, timeout: 30_000 }
+        {
+          cwd: tmpDir,
+          timeout: 30_000,
+          // Redirect npm's cache and userconfig into the temp dir so npm never
+          // tries to write to the home directory — on Vercel Lambda only /tmp
+          // is writable, and a failed cache write can cause npm to exit non-zero.
+          extraEnv: {
+            npm_config_cache: path.join(tmpDir, ".npm"),
+            npm_config_userconfig: path.join(tmpDir, ".npmrc"),
+          },
+        }
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      console.error("[bundle-scan] npm install failed:", msg);
       if (msg === "TIMEOUT") return { ok: false, error: "TIMEOUT", detail: "npm install timed out" };
       return { ok: false, error: "INSTALL_FAILED", detail: msg };
     }
@@ -70,6 +81,7 @@ export async function computeBundle(
     // Check package was installed
     const pkgDir = path.join(tmpDir, "node_modules", name.replace(/\//g, path.sep));
     if (!existsSync(pkgDir)) {
+      console.error("[bundle-scan] package dir not found after install:", pkgDir);
       return { ok: false, error: "INSTALL_FAILED", detail: "Package directory not found after install" };
     }
 
@@ -108,11 +120,15 @@ export async function computeBundle(
         nodePaths: [path.join(tmpDir, "node_modules")],
       });
     } catch (err: unknown) {
+      console.error("[bundle-scan] esbuild failed:", String(err));
       return { ok: false, error: "BUNDLE_FAILED", detail: String(err) };
     }
 
     const output = result.outputFiles?.[0];
-    if (!output) return { ok: false, error: "BUNDLE_FAILED", detail: "No output from esbuild" };
+    if (!output) {
+      console.error("[bundle-scan] esbuild produced no output");
+      return { ok: false, error: "BUNDLE_FAILED", detail: "No output from esbuild" };
+    }
 
     const minSize = output.contents.length;
     const gzipSize = zlib.gzipSync(output.contents).length;

@@ -155,8 +155,13 @@ async function fetchNpmBundleSize(name: string, version: string): Promise<{ min:
         const ev = JSON.parse(line.slice(6)) as
           | { type: "progress" }
           | { type: "result"; data: BundleResult | { ok: false } };
-        if (ev.type === "result" && ev.data.ok) {
-          result = { min: (ev.data as BundleResult).minSize, gzip: (ev.data as BundleResult).gzipSize };
+        if (ev.type === "result") {
+          if (ev.data.ok) {
+            result = { min: (ev.data as BundleResult).minSize, gzip: (ev.data as BundleResult).gzipSize };
+          } else {
+            const e = ev.data as { ok: false; error?: string; detail?: string };
+            console.error("[bundle-scan] bundle size failed:", e.error, e.detail);
+          }
         }
       }
     }
