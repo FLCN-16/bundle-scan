@@ -90,35 +90,51 @@ export async function computeBundle(
     await fs.writeFile(entryPath, `export * from ${JSON.stringify(name)};\n`);
 
     onProgress?.("bundling");
-    // Run esbuild
+    // Run esbuild, retrying with any unresolvable optional deps added to external.
+    // Packages like playwright-core have optional peer deps (chromium-bidi) that
+    // aren't installed, causing hard build errors that we can recover from.
     let result;
     try {
-      result = await build({
-        entryPoints: [entryPath],
-        bundle: true,
-        minify: true,
-        format: "esm",
-        platform: "browser",
-        metafile: true,
-        write: false,
-        external: [
-          ...builtinModules,
-          ...builtinModules.map((m) => `node:${m}`),
-          // native-only packages that can never run in a browser bundle
-          "fsevents", "canvas", "sharp", "sqlite3", "better-sqlite3",
-          "cpu-features", "ssh2",
-        ],
-        loader: {
-          // treat native addons as empty stubs — they can't be bundled anyway
-          ".node": "empty",
-        },
-        define: {
-          "process.env.NODE_ENV": '"production"',
-        },
-        logLevel: "silent",
-        absWorkingDir: tmpDir,
-        nodePaths: [path.join(tmpDir, "node_modules")],
-      });
+      const baseExternal = [
+        ...builtinModules,
+        ...builtinModules.map((m) => `node:${m}`),
+        // native-only packages that can never run in a browser bundle
+        "fsevents", "canvas", "sharp", "sqlite3", "better-sqlite3",
+        "cpu-features", "ssh2",
+      ];
+      const optionalFallbacks: string[] = [];
+
+      while (true) {
+        try {
+          result = await build({
+            entryPoints: [entryPath],
+            bundle: true,
+            minify: true,
+            format: "esm",
+            platform: "browser",
+            metafile: true,
+            write: false,
+            external: [...baseExternal, ...optionalFallbacks],
+            loader: {
+              // treat native addons as empty stubs — they can't be bundled anyway
+              ".node": "empty",
+            },
+            define: {
+              "process.env.NODE_ENV": '"production"',
+            },
+            logLevel: "silent",
+            absWorkingDir: tmpDir,
+            nodePaths: [path.join(tmpDir, "node_modules")],
+          });
+          break;
+        } catch (buildErr: unknown) {
+          const msg = String(buildErr);
+          const missing = [...msg.matchAll(/Could not resolve "([^"]+)"/g)].map((m) => m[1]);
+          const novel = missing.filter((m) => !optionalFallbacks.includes(m));
+          if (novel.length === 0) throw buildErr;
+          optionalFallbacks.push(...novel);
+        }
+      }
     } catch (err: unknown) {
       console.error("[bundle-scan] esbuild failed:", String(err));
       return { ok: false, error: "BUNDLE_FAILED", detail: String(err) };
