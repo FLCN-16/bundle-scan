@@ -113,6 +113,22 @@ export function parsePyprojectToml(content: string): ParsedPackage[] {
   return result;
 }
 
+export function parseUvLock(content: string): ParsedPackage[] {
+  const result: ParsedPackage[] = [];
+  // Split on [[package]] boundaries
+  const blocks = content.split(/^\[\[package\]\]/m).slice(1);
+  for (const block of blocks) {
+    // Read until the next top-level section
+    const section = block.split(/^\[(?!\[)/m)[0];
+    const name = section.match(/^name\s*=\s*"([^"]+)"/m)?.[1];
+    const version = section.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+    if (name && version) {
+      result.push({ name, version, registry: "pypi" });
+    }
+  }
+  return result;
+}
+
 export function detectAppName(filename: string, content: string): string | null {
   const lower = filename.toLowerCase();
   if (lower === "package.json" || lower.endsWith("/package.json") || content.trimStart().startsWith("{")) {
@@ -142,9 +158,11 @@ export function detectAndParse(filename: string, content: string): ParsedPackage
   if (lower === "requirements.txt" || lower.endsWith("/requirements.txt")) return parseRequirementsTxt(content);
   if (lower === "pom.xml" || lower.endsWith("/pom.xml")) return parsePomXml(content);
   if (lower === "pyproject.toml" || lower.endsWith("/pyproject.toml")) return parsePyprojectToml(content);
+  if (lower === "uv.lock" || lower.endsWith("/uv.lock")) return parseUvLock(content);
   // Auto-detect
   if (content.trimStart().startsWith("{")) return parsePackageJson(content);
   if (content.includes("<dependency>")) return parsePomXml(content);
   if (content.includes("[project]") || content.includes("[tool.poetry]")) return parsePyprojectToml(content);
+  if (content.includes("[[package]]") && content.includes('registry = "https://pypi.org')) return parseUvLock(content);
   return parseRequirementsTxt(content);
 }
