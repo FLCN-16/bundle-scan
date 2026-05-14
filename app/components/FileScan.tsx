@@ -441,10 +441,12 @@ export function FileScan({
   [withVulns]);
 
   const ambienceMode: AmbienceMode = useMemo(() => {
+    // "unknown" severity has no AMBIENCE entry — treat it as null
+    const sev = liveTopSev && liveTopSev in AMBIENCE ? (liveTopSev as AmbienceMode) : null;
     if (entries.length === 0) return "idle";
-    if (scanning) return (liveTopSev as AmbienceMode | null) ?? "scanning";
+    if (scanning) return sev ?? "scanning";
     if (isComplete && withVulns.length === 0) return "clean";
-    return (liveTopSev as AmbienceMode | null) ?? "idle";
+    return sev ?? "idle";
   }, [entries.length, scanning, isComplete, withVulns.length, liveTopSev]);
 
   const progressGradient = AMBIENCE[ambienceMode].progress;
