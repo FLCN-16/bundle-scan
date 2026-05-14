@@ -14,6 +14,11 @@ export async function GET(
     return Response.json({ ok: false }, { status: 400 });
   }
 
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    console.error("[bundle-scan] BLOB_READ_WRITE_TOKEN is not set — blob read skipped");
+    return Response.json({ ok: false, error: "blob_not_configured" }, { status: 503 });
+  }
+
   try {
     const { blobs } = await list({ prefix: `package-scans/${id}.json`, limit: 1 });
     if (!blobs.length) {
@@ -32,7 +37,8 @@ export async function GET(
     }
 
     return Response.json({ ok: true, data });
-  } catch {
+  } catch (err) {
+    console.error("[bundle-scan] blob list/fetch failed:", err);
     return Response.json({ ok: false }, { status: 500 });
   }
 }

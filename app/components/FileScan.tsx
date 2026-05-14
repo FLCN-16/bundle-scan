@@ -403,7 +403,9 @@ export function FileScan({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: scanId, data: payload }),
-      }).catch(() => {});
+      })
+        .then((r) => { if (!r.ok) console.error("[bundle-scan] blob save failed:", r.status); })
+        .catch((e) => console.error("[bundle-scan] blob save error:", e));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isComplete, scanning, scanId]);

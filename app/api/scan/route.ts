@@ -16,6 +16,11 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false }, { status: 400 });
   }
 
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    console.error("[bundle-scan] BLOB_READ_WRITE_TOKEN is not set — blob save skipped");
+    return Response.json({ ok: false, error: "blob_not_configured" }, { status: 503 });
+  }
+
   try {
     await put(`package-scans/${id}.json`, JSON.stringify(data), {
       access: "public",
@@ -23,7 +28,8 @@ export async function POST(request: NextRequest) {
       cacheControlMaxAge: 86400,
     });
     return Response.json({ ok: true });
-  } catch {
+  } catch (err) {
+    console.error("[bundle-scan] blob put failed:", err);
     return Response.json({ ok: false }, { status: 500 });
   }
 }
