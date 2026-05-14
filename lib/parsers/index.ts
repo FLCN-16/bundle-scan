@@ -58,18 +58,77 @@ export function parsePomXml(content: string): ParsedPackage[] {
   return result;
 }
 
+export function parsePyprojectToml(content: string): ParsedPackage[] {
+  const result: ParsedPackage[] = [];
+
+  function addPypiDep(raw: string) {
+    // requirements-style string: "requests>=2.28", "fastapi[all]>=0.100"
+    const line = raw.replace(/^["'\s]+|["'\s,]+$/g, "");
+    if (!line) return;
+    const m = line.match(/^([A-Za-z0-9_.\-]+)(?:\[[^\]]+\])?(?:==|>=|~=|<=|!=|>|<)([^\s,;]+)/);
+    if (m) {
+      result.push({ name: m[1], version: m[2].split(",")[0], registry: "pypi" });
+    } else {
+      const nameOnly = line.match(/^([A-Za-z0-9_.\-]+)/);
+      if (nameOnly && nameOnly[1].toLowerCase() !== "python") {
+        result.push({ name: nameOnly[1], version: "latest", registry: "pypi" });
+      }
+    }
+  }
+
+  // ── PEP 621: [project] dependencies = ["pkg>=1.0", ...] ──
+  const pep621 = content.match(/\[project\][\s\S]*?^dependencies\s*=\s*\[([\s\S]*?)\]/m);
+  if (pep621) {
+    for (const line of pep621[1].split("\n")) addPypiDep(line);
+  }
+  const optDeps = content.match(/\[project\.optional-dependencies\][^\[]*\w+\s*=\s*\[([\s\S]*?)\]/gm);
+  if (optDeps) {
+    for (const block of optDeps) {
+      const inner = block.match(/\[([\s\S]*?)\]/)?.[1] ?? "";
+      for (const line of inner.split("\n")) addPypiDep(line);
+    }
+  }
+
+  // ── Poetry: [tool.poetry.dependencies] / dev-dependencies / group deps ──
+  const poetryRe = /\[tool\.poetry(?:\.group\.[^.[\]]+)?\.(?:dev-)?dependencies\]([\s\S]*?)(?=\[|$)/gm;
+  let sm: RegExpExecArray | null;
+  while ((sm = poetryRe.exec(content)) !== null) {
+    for (const raw of sm[1].split("\n")) {
+      const line = raw.split("#")[0].trim();
+      if (!line || !line.includes("=")) continue;
+      const eqIdx = line.indexOf("=");
+      const name = line.slice(0, eqIdx).trim();
+      if (!name || name.toLowerCase() === "python" || name.startsWith("[")) continue;
+      const val = line.slice(eqIdx + 1).trim();
+      // inline table: {version = "^x.y"} or simple: "^x.y"
+      const verStr =
+        val.match(/version\s*=\s*["']([^"']+)["']/)?.[1] ??
+        val.match(/["']([^"']+)["']/)?.[1] ?? "";
+      const version = verStr === "*" ? "latest"
+        : verStr.replace(/^[\^~>=<*\s]+/, "").split(/[,\s]/)[0] || "latest";
+      result.push({ name, version, registry: "pypi" });
+    }
+  }
+
+  return result;
+}
+
 export function detectAppName(filename: string, content: string): string | null {
   const lower = filename.toLowerCase();
-  const isJson = lower === "package.json" || lower.endsWith("/package.json") || content.trimStart().startsWith("{");
-  if (isJson) {
+  if (lower === "package.json" || lower.endsWith("/package.json") || content.trimStart().startsWith("{")) {
     try {
       const json = JSON.parse(content) as Record<string, unknown>;
       return typeof json.name === "string" && json.name ? json.name : null;
     } catch { return null; }
   }
-  const isXml = lower === "pom.xml" || lower.endsWith("/pom.xml") || content.includes("<dependency>");
-  if (isXml) {
-    // grab the root <artifactId> — the one before any <dependency> block
+  if (lower === "pyproject.toml" || lower.endsWith("/pyproject.toml")) {
+    return (
+      content.match(/\[project\][\s\S]*?^name\s*=\s*["']([^"']+)["']/m)?.[1] ??
+      content.match(/\[tool\.poetry\][\s\S]*?^name\s*=\s*["']([^"']+)["']/m)?.[1] ??
+      null
+    );
+  }
+  if (lower === "pom.xml" || lower.endsWith("/pom.xml") || content.includes("<dependency>")) {
     const beforeDeps = content.split("<dependency>")[0];
     const m = beforeDeps.match(/<artifactId>([^<]+)<\/artifactId>/);
     return m ? m[1].trim() : null;
@@ -82,8 +141,10 @@ export function detectAndParse(filename: string, content: string): ParsedPackage
   if (lower === "package.json" || lower.endsWith("/package.json")) return parsePackageJson(content);
   if (lower === "requirements.txt" || lower.endsWith("/requirements.txt")) return parseRequirementsTxt(content);
   if (lower === "pom.xml" || lower.endsWith("/pom.xml")) return parsePomXml(content);
-  // Try to auto-detect
+  if (lower === "pyproject.toml" || lower.endsWith("/pyproject.toml")) return parsePyprojectToml(content);
+  // Auto-detect
   if (content.trimStart().startsWith("{")) return parsePackageJson(content);
   if (content.includes("<dependency>")) return parsePomXml(content);
+  if (content.includes("[project]") || content.includes("[tool.poetry]")) return parsePyprojectToml(content);
   return parseRequirementsTxt(content);
 }
