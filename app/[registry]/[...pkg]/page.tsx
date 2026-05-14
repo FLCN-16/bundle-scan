@@ -3,9 +3,10 @@ import type { Metadata } from "next";
 import { Download, Box, Globe, GitBranch, ExternalLink } from "lucide-react";
 import { resolveNpm } from "@/lib/registries/npm";
 import { resolvePypi } from "@/lib/registries/pypi";
+import { BundleDataProvider } from "@/app/components/BundleDataProvider";
 import { resolveMaven } from "@/lib/registries/maven";
 import { SecurityClient } from "@/app/components/SecurityClient";
-import { BundleClient } from "@/app/components/BundleClient";
+import { BundleClient, BundleSectionHeader } from "@/app/components/BundleClient";
 import { VersionPicker } from "@/app/components/VersionPicker";
 import { DependenciesClient } from "@/app/components/DependenciesClient";
 import { LanguageBar } from "@/app/components/LanguageBar";
@@ -126,6 +127,9 @@ const DIST_LABEL: Record<string, string> = {
   bdist_wheel: "Wheel",
   sdist: "Source",
   bdist_egg: "Egg",
+  jar: "JAR",
+  sources: "Sources JAR",
+  javadoc: "Javadoc JAR",
 };
 
 function PypiDistSizes({ distSizes }: { distSizes: NonNullable<PackageMeta["distSizes"]> }) {
@@ -182,6 +186,8 @@ function QuickFacts({ meta }: { meta: PackageMeta }) {
   if (meta.weeklyDownloads !== undefined)
     facts.push({ label: "Weekly downloads", value: compactCount(meta.weeklyDownloads) });
   facts.push({ label: "Dependencies", value: String(Object.keys(meta.dependencies).length) });
+  if (meta.maintainersCount !== undefined)
+    facts.push({ label: "Developers", value: String(meta.maintainersCount) });
   if (meta.ecosystem === "npm") {
     if (meta.hasTypes !== undefined)
       facts.push({ label: "TypeScript", value: meta.hasTypes ? "Included" : "None" });
@@ -340,6 +346,7 @@ export default async function PackagePage({ params }: PageProps) {
       </div>
 
       {/* Content grid */}
+      <BundleDataProvider name={meta.name} version={meta.version} enabled={validRegistry === "npm"}>
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
@@ -367,12 +374,14 @@ export default async function PackagePage({ params }: PageProps) {
               <InstallCommand registry={validRegistry} name={meta.name} version={meta.version} />
             </Card>
             <Card className="p-5">
-              <SectionLabel>
-                {validRegistry === "npm" ? "Bundle size" : "Distribution size"}
-              </SectionLabel>
+              {validRegistry === "npm" ? (
+                <BundleSectionHeader />
+              ) : (
+                <SectionLabel>Distribution size</SectionLabel>
+              )}
               {validRegistry === "npm" ? (
                 <BundleClient name={meta.name} version={meta.version} />
-              ) : validRegistry === "pypi" && meta.distSizes?.length ? (
+              ) : meta.distSizes?.length ? (
                 <PypiDistSizes distSizes={meta.distSizes} />
               ) : (
                 <p className="text-body-sm text-slate-400 py-2">
@@ -396,6 +405,7 @@ export default async function PackagePage({ params }: PageProps) {
 
         </div>
       </div>
+      </BundleDataProvider>
 
     </main>
   );

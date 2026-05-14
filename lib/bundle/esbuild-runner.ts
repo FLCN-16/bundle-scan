@@ -40,7 +40,8 @@ function spawnAsync(
 
 export async function computeBundle(
   name: string,
-  version: string
+  version: string,
+  onProgress?: (phase: "installing" | "bundling") => void
 ): Promise<BundleResponse> {
   const tmpDir = path.join(os.tmpdir(), `bundle-scan-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
@@ -49,6 +50,7 @@ export async function computeBundle(
 
     // Install the package
     const pkg = `${name}@${version}`;
+    onProgress?.("installing");
     try {
       await spawnAsync(
         "npm",
@@ -71,6 +73,7 @@ export async function computeBundle(
     const entryPath = path.join(tmpDir, "entry.js");
     await fs.writeFile(entryPath, `export * from ${JSON.stringify(name)};\n`);
 
+    onProgress?.("bundling");
     // Run esbuild
     let result;
     try {
@@ -82,7 +85,17 @@ export async function computeBundle(
         platform: "browser",
         metafile: true,
         write: false,
-        external: [...builtinModules, ...builtinModules.map((m) => `node:${m}`)],
+        external: [
+          ...builtinModules,
+          ...builtinModules.map((m) => `node:${m}`),
+          // native-only packages that can never run in a browser bundle
+          "fsevents", "canvas", "sharp", "sqlite3", "better-sqlite3",
+          "cpu-features", "ssh2",
+        ],
+        loader: {
+          // treat native addons as empty stubs — they can't be bundled anyway
+          ".node": "empty",
+        },
         define: {
           "process.env.NODE_ENV": '"production"',
         },
@@ -118,7 +131,14 @@ export async function computeBundle(
     }
 
     for (const [pkgName, bytes] of moduleMap) {
-      composition.push({ name: pkgName, bytes });
+      let version: string | undefined;
+      try {
+        const pkgJson = JSON.parse(
+          await fs.readFile(path.join(tmpDir, "node_modules", ...pkgName.split("/"), "package.json"), "utf8")
+        ) as { version?: string };
+        version = pkgJson.version;
+      } catch { /* not critical */ }
+      composition.push({ name: pkgName, bytes, version });
     }
     composition.sort((a, b) => b.bytes - a.bytes);
 

@@ -104,7 +104,7 @@ export function HomeHero() {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".json,.txt,.xml"
+          accept=".json,.txt,.xml,.toml,.lock"
           className="sr-only"
           onChange={handleInputChange}
         />
@@ -126,7 +126,7 @@ export function HomeHero() {
               <Package className="size-8 text-indigo-300" />
             </div>
             <p className="text-2xl font-semibold text-white">Drop to scan</p>
-            <p className="text-sm text-slate-300 font-mono">package.json · requirements.txt · pom.xml</p>
+            <p className="text-sm text-slate-300 font-mono">package.json · requirements.txt · pyproject.toml · uv.lock · pom.xml</p>
           </div>
         </div>
       )}
