@@ -25,7 +25,7 @@ export async function GET(
       return Response.json({ ok: false, expired: false }, { status: 404 });
     }
 
-    const res = await download(blobs[0].url);
+    const res = await fetch(blobs[0].url);
     if (!res.ok) return Response.json({ ok: false }, { status: 404 });
 
     const data = (await res.json()) as { savedAt?: number };
