@@ -25,7 +25,7 @@ export interface BundleResult {
   ok: true;
   minSize: number;
   gzipSize: number;
-  composition: Array<{ name: string; bytes: number }>;
+  composition: Array<{ name: string; bytes: number; version?: string }>;
 }
 
 export interface BundleError {

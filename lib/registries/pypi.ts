@@ -15,7 +15,7 @@ interface PypiResponse {
     author?: string;
     maintainer?: string;
   };
-  releases: Record<string, Array<{ upload_time?: string }>>;
+  releases?: Record<string, Array<{ upload_time?: string }>>;
   urls: Array<{ url: string; filename: string; packagetype: string; size: number; upload_time?: string }>;
 }
 
@@ -37,10 +37,14 @@ export async function resolvePypi(
   cacheTag(`registry:pypi:${name}:${version ?? "latest"}`);
   cacheLife("hours");
 
-  const data = await fetchPypi(name, version === "latest" ? undefined : version);
-  const { info, releases, urls } = data;
-
-  const allVersions = Object.keys(releases).reverse();
+  const specificVersion = version === "latest" ? undefined : version;
+  const [data, latestData] = await Promise.all([
+    fetchPypi(name, specificVersion),
+    specificVersion ? fetchPypi(name) : Promise.resolve(null),
+  ]);
+  const { info, urls } = data;
+  const releases = data.releases ?? latestData?.releases;
+  const allVersions = releases ? Object.keys(releases).reverse() : [info.version];
   const wheelUrl = urls.find((u) => u.filename.endsWith(".whl"))?.url;
   const distSizes = urls
     .filter((u) => u.size > 0)
@@ -82,5 +86,5 @@ export async function listPypiVersions(name: string): Promise<string[]> {
   cacheTag(`pypi-versions:${name}`);
   cacheLife("hours");
   const data = await fetchPypi(name);
-  return Object.keys(data.releases).reverse();
+  return Object.keys(data.releases ?? {}).reverse();
 }

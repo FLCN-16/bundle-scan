@@ -29,10 +29,10 @@ export function VersionPicker({
   const [query, setQuery] = useState("");
 
   useEffect(() => {
-    if (initialVersions.length) return;
-    if (registry !== "npm") return;
+    if (initialVersions.length > 1) return;
+    if (registry !== "npm" && registry !== "pypi") return;
     const encoded = encodeURIComponent(name).replace(/%40/g, "@").replace(/%2F/g, "/");
-    fetch(`/api/versions/npm?name=${encoded}`)
+    fetch(`/api/versions/${registry}?name=${encoded}`)
       .then((r) => r.json())
       .then((data: { versions: string[] }) => {
         if (data.versions.length) setVersions(data.versions);
