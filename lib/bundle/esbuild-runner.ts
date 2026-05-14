@@ -115,7 +115,7 @@ export async function computeBundle(
 
     // Compute composition from metafile
     const inputs = result.metafile?.inputs ?? {};
-    const composition: Array<{ name: string; bytes: number }> = [];
+    const composition: Array<{ name: string; bytes: number; version?: string }> = [];
     const moduleMap = new Map<string, number>();
 
     for (const [filePath, data] of Object.entries(inputs)) {
