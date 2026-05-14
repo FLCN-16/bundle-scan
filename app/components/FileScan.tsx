@@ -387,7 +387,10 @@ export function FileScan({
   const isComplete = done === entries.length && entries.length > 0;
 
   useEffect(() => {
-    if (isComplete && scanId && filename && !savedToStorage.current) {
+    // Wait for both security (isComplete) AND bundle sizes (!scanning) before saving.
+    // Bundle size fetches run in parallel with security but can take much longer;
+    // saving on isComplete alone would write size:undefined for all npm entries.
+    if (isComplete && !scanning && scanId && filename && !savedToStorage.current) {
       savedToStorage.current = true;
       const now = Date.now();
       const payload: SavedScan = { filename, appName, appDescription, entries, savedAt: now, scannedAt: now };
@@ -402,9 +405,8 @@ export function FileScan({
         body: JSON.stringify({ id: scanId, data: payload }),
       }).catch(() => {});
     }
-  // entries reference changes each render; only save once isComplete flips true
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isComplete, scanId]);
+  }, [isComplete, scanning, scanId]);
 
   const bundleStats = useMemo(() => {
     const npmEntries = entries.filter((e) => e.pkg.registry === "npm");

@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { computeBundle } from "@/lib/bundle/esbuild-runner";
 
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   let body: { name?: string; version?: string };
   try {

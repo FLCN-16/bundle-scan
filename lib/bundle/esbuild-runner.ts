@@ -8,6 +8,10 @@ import { build } from "esbuild";
 import type { BundleResponse } from "@/lib/types";
 import { builtinModules } from "node:module";
 
+// npm is co-located with the node binary — resolve it absolutely so it works
+// in Vercel Lambda where the system PATH doesn't include the Node.js bin dir.
+const NPM_BIN = path.join(path.dirname(process.execPath), "npm");
+
 function spawnAsync(
   cmd: string,
   args: string[],
@@ -53,7 +57,7 @@ export async function computeBundle(
     onProgress?.("installing");
     try {
       await spawnAsync(
-        "npm",
+        NPM_BIN,
         ["install", pkg, "--no-save", "--omit=dev", "--prefer-offline", "--no-package-lock", "--ignore-scripts"],
         { cwd: tmpDir, timeout: 30_000 }
       );
