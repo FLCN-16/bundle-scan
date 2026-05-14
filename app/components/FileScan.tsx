@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Check, AlertCircle, RotateCcw, FileText, ShieldAlert, ShieldCheck, Package, Copy, ClipboardCheck } from "lucide-react";
-import { detectAndParse, detectAppName, type ParsedPackage } from "@/lib/parsers";
+import { detectAndParse, detectAppMeta, type ParsedPackage } from "@/lib/parsers";
 import { fetchSecurity } from "@/lib/actions/security";
 import { fetchPackageSize } from "@/lib/actions/package-size";
 import type { Advisory, BundleResult, SecurityResult, Severity } from "@/lib/types";
@@ -125,6 +125,7 @@ export interface ScanEntry {
 export interface SavedScan {
   filename: string;
   appName?: string | null;
+  appDescription?: string | null;
   entries: ScanEntry[];
   savedAt: number;
   scannedAt?: number;
@@ -303,6 +304,7 @@ export function FileScan({
   const [parseError, setParseError] = useState<string | null>(null);
   const [filename, setFilename] = useState<string | null>(savedScan?.filename ?? null);
   const [appName, setAppName] = useState<string | null>(savedScan?.appName ?? null);
+  const [appDescription, setAppDescription] = useState<string | null>(savedScan?.appDescription ?? null);
   const [scannedAt] = useState<number | null>(savedScan?.scannedAt ?? null);
   const [copied, setCopied] = useState(false);
   const hasStarted = useRef(false);
@@ -320,7 +322,9 @@ export function FileScan({
   const handleFile = useCallback(async (name: string, content: string) => {
     setParseError(null);
     setFilename(name);
-    setAppName(detectAppName(name, content));
+    const meta = detectAppMeta(name, content);
+    setAppName(meta.name);
+    setAppDescription(meta.description);
     let packages: ParsedPackage[];
     try {
       packages = detectAndParse(name, content);
@@ -386,7 +390,7 @@ export function FileScan({
     if (isComplete && scanId && filename && !savedToStorage.current) {
       savedToStorage.current = true;
       const now = Date.now();
-      const payload: SavedScan = { filename, appName, entries, savedAt: now, scannedAt: now };
+      const payload: SavedScan = { filename, appName, appDescription, entries, savedAt: now, scannedAt: now };
       // fast local cache for same-browser reloads
       try {
         localStorage.setItem(`bundle-scan-result-${scanId}`, JSON.stringify(payload));
@@ -503,13 +507,18 @@ export function FileScan({
                   <FileText className="size-3.5 text-slate-400 dark:text-slate-500" />
                 </div>
                 <div className="min-w-0">
-                  {appName ? (
-                    <>
-                      <p className="font-mono text-sm font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[260px] leading-tight">{appName}</p>
-                      <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate max-w-[260px] leading-tight">{filename}</p>
-                    </>
-                  ) : (
-                    <p className="font-mono text-sm font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[260px]">{filename}</p>
+                  <p className="font-mono text-sm font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[280px] leading-tight">
+                    {appName ?? filename}
+                  </p>
+                  {appDescription && (
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate max-w-[280px] leading-tight mt-0.5">
+                      {appDescription}
+                    </p>
+                  )}
+                  {appName && (
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate max-w-[280px] leading-tight">
+                      {filename}
+                    </p>
                   )}
                 </div>
                 {scanning ? (
