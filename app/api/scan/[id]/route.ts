@@ -1,4 +1,4 @@
-import { list, del } from "@vercel/blob";
+import { list, del, download } from "@vercel/blob";
 import { NextRequest } from "next/server";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
