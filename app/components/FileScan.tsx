@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Check, AlertCircle, RotateCcw, FileText, ShieldAlert, ShieldCheck, Package, Copy, ClipboardCheck } from "lucide-react";
-import { detectAndParse, type ParsedPackage } from "@/lib/parsers";
+import { detectAndParse, detectAppName, type ParsedPackage } from "@/lib/parsers";
 import { fetchSecurity } from "@/lib/actions/security";
 import { fetchPackageSize } from "@/lib/actions/package-size";
 import type { Advisory, BundleResult, SecurityResult, Severity } from "@/lib/types";
@@ -88,7 +88,8 @@ function semverGt(a: string, b: string): boolean {
 function bestFixVersion(advisories: Advisory[]): string | null {
   const versions = advisories.flatMap((a) => a.fixedVersions).filter(Boolean);
   if (!versions.length) return null;
-  return versions.reduce((best, v) => semverGt(v, best) ? v : best, versions[0]);
+  // smallest version that fixes — prefer the least-disruptive patch upgrade
+  return versions.reduce((best, v) => semverGt(best, v) ? v : best, versions[0]);
 }
 
 function buildFixCommand(entries: ScanEntry[]): string {
@@ -123,8 +124,10 @@ export interface ScanEntry {
 
 export interface SavedScan {
   filename: string;
+  appName?: string | null;
   entries: ScanEntry[];
   savedAt: number;
+  scannedAt?: number;
 }
 
 async function fetchNpmBundleSize(name: string, version: string): Promise<{ min: number; gzip: number } | null> {
@@ -299,6 +302,8 @@ export function FileScan({
   const [scanning, setScanning] = useState(false);
   const [parseError, setParseError] = useState<string | null>(null);
   const [filename, setFilename] = useState<string | null>(savedScan?.filename ?? null);
+  const [appName, setAppName] = useState<string | null>(savedScan?.appName ?? null);
+  const [scannedAt] = useState<number | null>(savedScan?.scannedAt ?? null);
   const [copied, setCopied] = useState(false);
   const hasStarted = useRef(false);
   const savedToStorage = useRef(!!savedScan);
@@ -315,6 +320,7 @@ export function FileScan({
   const handleFile = useCallback(async (name: string, content: string) => {
     setParseError(null);
     setFilename(name);
+    setAppName(detectAppName(name, content));
     let packages: ParsedPackage[];
     try {
       packages = detectAndParse(name, content);
@@ -379,7 +385,8 @@ export function FileScan({
   useEffect(() => {
     if (isComplete && scanId && filename && !savedToStorage.current) {
       savedToStorage.current = true;
-      const payload: SavedScan = { filename, entries, savedAt: Date.now() };
+      const now = Date.now();
+      const payload: SavedScan = { filename, appName, entries, savedAt: now, scannedAt: now };
       // fast local cache for same-browser reloads
       try {
         localStorage.setItem(`bundle-scan-result-${scanId}`, JSON.stringify(payload));
@@ -406,6 +413,11 @@ export function FileScan({
   useEffect(() => {
     if (!showBundleCard && bundleStats.sizedCount > 0) setShowBundleCard(true);
   }, [bundleStats.sizedCount, showBundleCard]);
+
+  useEffect(() => {
+    if (appName) document.title = `${appName} — Bundle Scan`;
+    return () => { document.title = "Scan results — Bundle Scan"; };
+  }, [appName]);
 
   const sevCounts = useMemo(() => {
     const c = { critical: 0, high: 0, medium: 0, low: 0 };
@@ -490,9 +502,16 @@ export function FileScan({
                 <div className="size-7 rounded-lg border border-black/8 dark:border-white/8 bg-white/70 dark:bg-white/6 flex items-center justify-center flex-shrink-0">
                   <FileText className="size-3.5 text-slate-400 dark:text-slate-500" />
                 </div>
-                <span className="font-mono text-sm font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[260px]">
-                  {filename}
-                </span>
+                <div className="min-w-0">
+                  {appName ? (
+                    <>
+                      <p className="font-mono text-sm font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[260px] leading-tight">{appName}</p>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate max-w-[260px] leading-tight">{filename}</p>
+                    </>
+                  ) : (
+                    <p className="font-mono text-sm font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[260px]">{filename}</p>
+                  )}
+                </div>
                 {scanning ? (
                   <span className="flex items-center gap-1.5 text-xs text-indigo-500 dark:text-indigo-400 font-medium ml-1 flex-shrink-0">
                     <span className="size-1.5 rounded-full bg-indigo-500 animate-pulse" />
@@ -548,8 +567,8 @@ export function FileScan({
               </div>
             </div>
 
-            {/* Progress count */}
-            <div className="px-5 pb-4 flex items-center justify-between">
+            {/* Progress count + scan date */}
+            <div className="px-5 pb-4 flex items-center justify-between gap-3">
               <span className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">
                 <span className="font-semibold text-slate-600 dark:text-slate-300">{done}</span>
                 {" / "}{entries.length} packages
@@ -557,9 +576,11 @@ export function FileScan({
                   <> · <span className="font-semibold text-red-500 dark:text-red-400">{withVulns.length}</span> vulnerable</>
                 )}
               </span>
-              {isComplete && (
-                <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-white/5 border border-black/5 dark:border-white/6 px-2 py-0.5 rounded-md">
-                  {clean.length} clean
+              {(isComplete || scannedAt) && (
+                <span className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums flex-shrink-0">
+                  {new Date(scannedAt ?? Date.now()).toLocaleString(undefined, {
+                    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                  })}
                 </span>
               )}
             </div>
@@ -596,19 +617,6 @@ export function FileScan({
                   </div>
                 </div>
 
-                {bundleStats.npmTotal > 0 && (
-                  <>
-                    <div className="h-0.5 bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-500"
-                        style={{ width: `${(bundleStats.sizedCount / bundleStats.npmTotal) * 100}%` }}
-                      />
-                    </div>
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums text-center">
-                      {bundleStats.sizedCount} of {bundleStats.npmTotal} npm packages
-                    </p>
-                  </>
-                )}
               </div>
             </div>
           )}

@@ -58,6 +58,25 @@ export function parsePomXml(content: string): ParsedPackage[] {
   return result;
 }
 
+export function detectAppName(filename: string, content: string): string | null {
+  const lower = filename.toLowerCase();
+  const isJson = lower === "package.json" || lower.endsWith("/package.json") || content.trimStart().startsWith("{");
+  if (isJson) {
+    try {
+      const json = JSON.parse(content) as Record<string, unknown>;
+      return typeof json.name === "string" && json.name ? json.name : null;
+    } catch { return null; }
+  }
+  const isXml = lower === "pom.xml" || lower.endsWith("/pom.xml") || content.includes("<dependency>");
+  if (isXml) {
+    // grab the root <artifactId> — the one before any <dependency> block
+    const beforeDeps = content.split("<dependency>")[0];
+    const m = beforeDeps.match(/<artifactId>([^<]+)<\/artifactId>/);
+    return m ? m[1].trim() : null;
+  }
+  return null;
+}
+
 export function detectAndParse(filename: string, content: string): ParsedPackage[] {
   const lower = filename.toLowerCase();
   if (lower === "package.json" || lower.endsWith("/package.json")) return parsePackageJson(content);
