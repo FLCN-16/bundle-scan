@@ -368,9 +368,12 @@ export function FileScan({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isComplete, scanId]);
 
-  const totalBytes = useMemo(() => {
-    const sum = entries.reduce((acc, e) => acc + (e.size?.min ?? 0), 0);
-    return sum > 0 ? sum : null;
+  const bundleStats = useMemo(() => {
+    const npmEntries = entries.filter((e) => e.pkg.registry === "npm");
+    const withSize = npmEntries.filter((e) => e.size != null);
+    const totalMin = withSize.reduce((a, e) => a + e.size!.min, 0);
+    const totalGzip = withSize.filter((e) => e.size!.gzip != null).reduce((a, e) => a + e.size!.gzip!, 0);
+    return { totalMin, totalGzip, sizedCount: withSize.length, npmTotal: npmEntries.length };
   }, [entries]);
 
   const sevCounts = useMemo(() => {
@@ -414,6 +417,8 @@ export function FileScan({
   const vulnEntries = sorted.filter((e) => e.status === "done" && (e.result?.advisories.length ?? 0) > 0);
   const cleanEntries = sorted.filter((e) => e.status === "done" && (e.result?.advisories.length ?? 0) === 0);
   const inProgressEntries = sorted.filter((e) => e.status === "scanning" || e.status === "pending");
+  const activeScanningEntries = inProgressEntries.filter((e) => e.status === "scanning");
+  const pendingCount = inProgressEntries.filter((e) => e.status === "pending").length;
 
   if (!entries.length) {
     return (
@@ -441,121 +446,178 @@ export function FileScan({
     <>
       <ScanAmbience mode={ambienceMode} />
 
-      <div className="space-y-4">
+      <div className="space-y-3">
 
-        {/* Status bar */}
-        <div className="relative rounded-2xl border border-black/7 dark:border-white/7 bg-white/70 dark:bg-white/4 backdrop-blur-xl overflow-hidden">
-          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/15 to-transparent pointer-events-none" />
+        {/* ── Bento row 1: Status card (2/3) + Bundle size card (1/3) ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-start">
 
-          {/* Top row: file name + status + new scan */}
-          <div className="px-5 pt-4 pb-3 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="size-7 rounded-lg border border-black/8 dark:border-white/8 bg-white/70 dark:bg-white/6 flex items-center justify-center flex-shrink-0">
-                <FileText className="size-3.5 text-slate-400 dark:text-slate-500" />
-              </div>
-              <span className="font-mono text-sm font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[260px]">
-                {filename}
-              </span>
-              {scanning ? (
-                <span className="flex items-center gap-1.5 text-xs text-indigo-500 dark:text-indigo-400 font-medium ml-1 flex-shrink-0">
-                  <span className="size-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                  Scanning…
-                </span>
-              ) : isComplete && withVulns.length === 0 ? (
-                <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-medium ml-1 flex-shrink-0">
-                  <Check className="size-3 stroke-[2.5]" />
-                  All clean
-                </span>
-              ) : null}
-            </div>
-            <button
-              onClick={() => router.push("/")}
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-black/7 dark:border-white/8 bg-white/60 dark:bg-white/5 text-slate-500 dark:text-slate-400 hover:bg-white dark:hover:bg-white/10 hover:text-slate-700 dark:hover:text-slate-200 transition-colors flex-shrink-0"
-            >
-              <RotateCcw className="size-3" />
-              New scan
-            </button>
-          </div>
+          {/* Status card */}
+          <div className="lg:col-span-2 relative rounded-2xl border border-black/7 dark:border-white/7 bg-white/70 dark:bg-white/4 backdrop-blur-xl overflow-hidden">
+            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/15 to-transparent pointer-events-none" />
 
-          {/* Severity stats — always visible */}
-          <div className="px-5 pb-4 grid grid-cols-4 gap-2">
-            {(["critical", "high", "medium", "low"] as const).map((sev) => {
-              const count = sevCounts[sev];
-              const active = count > 0;
-              const colors: Record<string, string> = {
-                critical: active ? "border-red-500/20 bg-red-500/6" : "border-black/5 dark:border-white/5",
-                high:     active ? "border-orange-500/20 bg-orange-500/6" : "border-black/5 dark:border-white/5",
-                medium:   active ? "border-amber-500/20 bg-amber-500/6" : "border-black/5 dark:border-white/5",
-                low:      active ? "border-blue-500/20 bg-blue-500/6" : "border-black/5 dark:border-white/5",
-              };
-              return (
-                <div key={sev} className={`rounded-xl border px-3 py-2.5 text-center transition-colors duration-500 ${colors[sev]}`}>
-                  <p className={`text-xl font-bold tabular-nums leading-none ${active ? SEV_LABEL[sev] : "text-slate-300 dark:text-slate-700"}`}>
-                    {count}
-                  </p>
-                  <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mt-1 capitalize tracking-wide">{sev}</p>
+            {/* File name + actions */}
+            <div className="px-5 pt-4 pb-3 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="size-7 rounded-lg border border-black/8 dark:border-white/8 bg-white/70 dark:bg-white/6 flex items-center justify-center flex-shrink-0">
+                  <FileText className="size-3.5 text-slate-400 dark:text-slate-500" />
                 </div>
-              );
-            })}
-          </div>
+                <span className="font-mono text-sm font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[260px]">
+                  {filename}
+                </span>
+                {scanning ? (
+                  <span className="flex items-center gap-1.5 text-xs text-indigo-500 dark:text-indigo-400 font-medium ml-1 flex-shrink-0">
+                    <span className="size-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                    Scanning…
+                  </span>
+                ) : isComplete && withVulns.length === 0 ? (
+                  <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-medium ml-1 flex-shrink-0">
+                    <Check className="size-3 stroke-[2.5]" />
+                    All clean
+                  </span>
+                ) : null}
+              </div>
+              <button
+                onClick={() => router.push("/")}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-black/7 dark:border-white/8 bg-white/60 dark:bg-white/5 text-slate-500 dark:text-slate-400 hover:bg-white dark:hover:bg-white/10 hover:text-slate-700 dark:hover:text-slate-200 transition-colors flex-shrink-0"
+              >
+                <RotateCcw className="size-3" />
+                New scan
+              </button>
+            </div>
 
-          {/* Progress bar — always visible */}
-          <div className="h-1 bg-slate-100 dark:bg-white/5 mx-5 mb-4 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full bg-gradient-to-r transition-all duration-500 ${progressGradient} ${scanning ? "relative overflow-hidden" : ""}`}
-              style={{ width: `${entries.length ? (done / entries.length) * 100 : 0}%` }}
-            >
-              {scanning && (
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent animate-[shimmer_1.4s_ease-in-out_infinite]" />
+            {/* Severity counts */}
+            <div className="px-5 pb-4 grid grid-cols-4 gap-2">
+              {(["critical", "high", "medium", "low"] as const).map((sev) => {
+                const count = sevCounts[sev];
+                const active = count > 0;
+                const colors: Record<string, string> = {
+                  critical: active ? "border-red-500/20 bg-red-500/6"    : "border-black/5 dark:border-white/5",
+                  high:     active ? "border-orange-500/20 bg-orange-500/6" : "border-black/5 dark:border-white/5",
+                  medium:   active ? "border-amber-500/20 bg-amber-500/6"  : "border-black/5 dark:border-white/5",
+                  low:      active ? "border-blue-500/20 bg-blue-500/6"   : "border-black/5 dark:border-white/5",
+                };
+                return (
+                  <div key={sev} className={`rounded-xl border px-3 py-2.5 text-center transition-colors duration-500 ${colors[sev]}`}>
+                    <p className={`text-xl font-bold tabular-nums leading-none ${active ? SEV_LABEL[sev] : "text-slate-300 dark:text-slate-700"}`}>
+                      {count}
+                    </p>
+                    <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mt-1 capitalize tracking-wide">{sev}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Progress bar */}
+            <div className="h-1 bg-slate-100 dark:bg-white/5 mx-5 mb-3 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full bg-gradient-to-r transition-all duration-500 ${progressGradient} ${scanning ? "relative overflow-hidden" : ""}`}
+                style={{ width: `${entries.length ? (done / entries.length) * 100 : 0}%` }}
+              >
+                {scanning && (
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent animate-[shimmer_1.4s_ease-in-out_infinite]" />
+                )}
+              </div>
+            </div>
+
+            {/* Progress count */}
+            <div className="px-5 pb-4 flex items-center justify-between">
+              <span className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">
+                <span className="font-semibold text-slate-600 dark:text-slate-300">{done}</span>
+                {" / "}{entries.length} packages
+                {withVulns.length > 0 && (
+                  <> · <span className="font-semibold text-red-500 dark:text-red-400">{withVulns.length}</span> vulnerable</>
+                )}
+              </span>
+              {isComplete && (
+                <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-white/5 border border-black/5 dark:border-white/6 px-2 py-0.5 rounded-md">
+                  {clean.length} clean
+                </span>
               )}
             </div>
           </div>
 
-          {/* Progress count + total size */}
-          <div className="px-5 pb-4 -mt-2 flex items-center justify-between">
-            <span className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">
-              <span className="font-semibold text-slate-600 dark:text-slate-300">{done}</span>
-              {" / "}{entries.length} packages
-              {withVulns.length > 0 && (
-                <> · <span className="font-semibold text-red-500 dark:text-red-400">{withVulns.length}</span> vulnerable</>
+          {/* Bundle size card */}
+          <div className="relative rounded-2xl border border-black/7 dark:border-white/7 bg-white/70 dark:bg-white/4 backdrop-blur-xl overflow-hidden p-5">
+            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/15 to-transparent pointer-events-none" />
+
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">Bundle Size</p>
+              {scanning && bundleStats.totalMin > 0 && (
+                <span className="size-1.5 rounded-full bg-indigo-500 animate-pulse" />
               )}
-            </span>
-            {totalBytes != null && (
-              <span className="text-xs font-medium text-slate-500 dark:text-slate-400 tabular-nums">
-                <span className="text-[10px] text-slate-400 dark:text-slate-500 mr-1">total</span>
-                {fmtBytes(totalBytes)}
-              </span>
+            </div>
+
+            {bundleStats.totalMin > 0 ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-black/5 dark:border-white/5 bg-white/50 dark:bg-white/3 p-3 text-center">
+                    <p className="text-2xl font-bold tabular-nums text-slate-800 dark:text-slate-100 leading-none">
+                      {fmtBytes(bundleStats.totalMin)}
+                    </p>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5">minified</p>
+                  </div>
+                  <div className="rounded-xl border border-black/5 dark:border-white/5 bg-white/50 dark:bg-white/3 p-3 text-center">
+                    <p className="text-2xl font-bold tabular-nums text-slate-800 dark:text-slate-100 leading-none">
+                      {fmtBytes(bundleStats.totalGzip)}
+                    </p>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5">gzip</p>
+                  </div>
+                </div>
+
+                {/* Progress toward full bundle coverage */}
+                {bundleStats.npmTotal > 0 && (
+                  <>
+                    <div className="h-0.5 bg-slate-100 dark:bg-white/5 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-500"
+                        style={{ width: `${(bundleStats.sizedCount / bundleStats.npmTotal) * 100}%` }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums text-center">
+                      {bundleStats.sizedCount} of {bundleStats.npmTotal} npm packages
+                    </p>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-8 gap-3">
+                <div className="size-9 rounded-xl border border-black/6 dark:border-white/6 bg-white/50 dark:bg-white/3 flex items-center justify-center">
+                  <Package className="size-4 text-slate-300 dark:text-slate-600" />
+                </div>
+                <p className="text-xs text-slate-300 dark:text-slate-600">
+                  {scanning ? "Computing…" : "No npm packages"}
+                </p>
+              </div>
             )}
           </div>
         </div>
 
-        {/* In-progress — full width while scanning */}
+        {/* ── In-progress strip (single line, shown while scanning) ── */}
         {inProgressEntries.length > 0 && (
-          <div className="relative rounded-2xl border border-black/7 dark:border-white/7 bg-white/80 dark:bg-white/4 backdrop-blur-xl overflow-hidden">
-            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 dark:via-white/15 to-transparent pointer-events-none" />
-            <div className="sticky top-0 z-10 px-5 py-3 bg-white/95 dark:bg-[#0f0f12]/95 backdrop-blur border-b border-black/5 dark:border-white/5 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="size-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">In progress</p>
-              </div>
-              <span className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">{inProgressEntries.length} remaining</span>
-            </div>
-            <div className="px-4 max-h-[600px] overflow-y-auto">
-              {inProgressEntries.slice(0, 10).map((e, i) => (
-                <ScanRow key={`pending-${i}`} entry={e} />
+          <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-black/5 dark:border-white/5 bg-white/50 dark:bg-white/3 backdrop-blur overflow-hidden">
+            <span className="size-1.5 rounded-full bg-indigo-500 animate-pulse flex-shrink-0" />
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 flex-shrink-0">Scanning</span>
+            <div className="flex items-center gap-1.5 flex-1 min-w-0 overflow-hidden">
+              {activeScanningEntries.map((e, i) => (
+                <span
+                  key={i}
+                  className="font-mono text-[11px] px-2 py-0.5 rounded-md bg-indigo-500/8 border border-indigo-500/15 text-indigo-600 dark:text-indigo-400 whitespace-nowrap flex-shrink-0"
+                >
+                  {e.pkg.name}
+                </span>
               ))}
-              {inProgressEntries.filter((e) => e.status === "pending").length > 10 && (
-                <p className="text-xs text-slate-400 dark:text-slate-500 py-2.5 pl-3.5">
-                  + {inProgressEntries.filter((e) => e.status === "pending").length - 10} more queued…
-                </p>
-              )}
             </div>
+            {pendingCount > 0 && (
+              <span className="text-[11px] text-slate-400 dark:text-slate-500 tabular-nums flex-shrink-0">
+                +{pendingCount} queued
+              </span>
+            )}
           </div>
         )}
 
-        {/* Vulnerabilities + Clean — side by side */}
+        {/* ── Bento row 2: Vulnerabilities + Clean ── */}
         {(vulnEntries.length > 0 || (isComplete && cleanEntries.length > 0)) && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
 
             {/* Vulnerabilities */}
             {vulnEntries.length > 0 && (
