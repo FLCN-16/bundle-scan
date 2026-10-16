@@ -21,10 +21,18 @@ function dedupeAdvisories(advisories: Advisory[]): Advisory[] {
 
     if (existingKey) {
       const existing = seen.get(existingKey)!;
-      // Prefer high-confidence source
-      if (adv.confidence === "high" && existing.confidence === "low") {
-        for (const id of ids) seen.set(id, { ...adv, aliases: [...new Set([...adv.aliases, ...existing.aliases, existing.id])] });
-      }
+      const preferred = adv.confidence === "high" && existing.confidence === "low" ? adv : existing;
+      const other = preferred === adv ? existing : adv;
+      const merged: Advisory = {
+        ...preferred,
+        aliases: [...new Set([
+          ...preferred.aliases,
+          ...other.aliases,
+          preferred.id === other.id ? "" : other.id,
+        ].filter(Boolean))],
+        fixedVersions: [...new Set([...preferred.fixedVersions, ...other.fixedVersions])],
+      };
+      for (const id of [...ids, existing.id, ...existing.aliases]) seen.set(id, merged);
     } else {
       const entry = adv;
       for (const id of ids) seen.set(id, entry);

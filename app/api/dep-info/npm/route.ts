@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aggregateSecurity } from "@/lib/security/aggregate";
+import { cmpSemver, compareVersions, versionInRange } from "@/lib/security/semver";
 
 function cleanVersion(range: string): string {
   // Strip outer parens (PyPI style): (>=2,<4) → >=2,<4
-  let s = range.split("||")[0].trim().replace(/^\(|\)$/g, "").trim();
+  const s = range.split("||")[0].trim().replace(/^\(|\)$/g, "").trim();
   // Exact pin: ==2.31.0
   const exact = s.match(/^==([^\s,]+)/);
   if (exact) return exact[1];
@@ -20,6 +21,10 @@ function cleanVersion(range: string): string {
 
 function npmPath(name: string) {
   return encodeURIComponent(name).replace(/%40/g, "@").replace(/%2F/g, "/");
+}
+
+function isConcreteVersion(value: string): boolean {
+  return /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value.trim());
 }
 
 async function fetchBundlephobia(
@@ -55,11 +60,34 @@ async function fetchNpmMeta(
     return res.json() as Promise<{ version: string; dist?: { unpackedSize?: number } }>;
   };
 
-  let data = await tryFetch(clean);
-  if (!data) data = await tryFetch("latest");
-  if (!data) return { resolvedVersion: clean };
+  let resolvedVersion = clean;
+  const rangeLike = /[\^~<>=*|,\s]/.test(version) || (!isConcreteVersion(version) && /^\d/.test(version));
+  let data = rangeLike ? null : await tryFetch(clean);
 
-  const resolvedVersion = data.version ?? clean;
+  // A manifest range is not an installed version. Resolve it against the
+  // registry's published versions before looking up security advisories so a
+  // lower bound such as ^4.17.20 is not scanned as 4.17.20.
+  if (!data && rangeLike) {
+    const res = await fetch(
+      `https://registry.npmjs.org/${encoded}`,
+      { headers: { Accept: "application/json" }, next: { revalidate: 86400 } }
+    );
+    if (!res.ok) throw new Error(`npm: unable to resolve range ${name}@${version} (HTTP ${res.status})`);
+    const packument = await res.json() as {
+      versions?: Record<string, unknown>;
+    };
+    const match = Object.keys(packument.versions ?? {})
+      .filter((candidate) => compareVersions(candidate, candidate) !== null && versionInRange(candidate, version))
+      .sort((a, b) => cmpSemver(b, a))[0];
+    if (!match) throw new Error(`npm: no published version satisfies ${name}@${version}`);
+    resolvedVersion = match;
+    data = await tryFetch(resolvedVersion);
+  }
+
+  if (!data && clean === "latest") data = await tryFetch("latest");
+  if (!data) return { resolvedVersion };
+
+  resolvedVersion = data.version ?? resolvedVersion;
   const bp = await fetchBundlephobia(name, resolvedVersion);
 
   return {
@@ -82,10 +110,10 @@ export async function GET(request: NextRequest) {
 
   try {
     const secVersion = cleanVersion(version);
-    const [npmMeta, security] = await Promise.all([
-      ecosystem === "npm" ? fetchNpmMeta(name, version) : Promise.resolve({ resolvedVersion: secVersion }),
-      aggregateSecurity(name, ecosystem, secVersion),
-    ]);
+    const npmMeta = ecosystem === "npm"
+      ? await fetchNpmMeta(name, version)
+      : { resolvedVersion: secVersion };
+    const security = await aggregateSecurity(name, ecosystem, npmMeta.resolvedVersion || secVersion);
 
     return NextResponse.json({ ...npmMeta, security });
   } catch (err: unknown) {

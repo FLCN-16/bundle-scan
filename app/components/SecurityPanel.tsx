@@ -1,4 +1,4 @@
-import { Check } from "lucide-react";
+import { AlertTriangle, Check } from "lucide-react";
 import type { Advisory, SecurityResult, Severity } from "@/lib/types";
 import { SeverityBadge } from "./SeverityBadge";
 
@@ -53,6 +53,7 @@ function AdvisoryCard({ adv }: { adv: Advisory }) {
 
 export function SecurityPanel({ result }: { result: SecurityResult }) {
   const { advisories, sources } = result;
+  const allSourcesAvailable = sources.osv && sources.ghsa && sources.nvd;
   const counts: Record<Severity, number> = {
     critical: countBySeverity(advisories, "critical"),
     high: countBySeverity(advisories, "high"),
@@ -68,21 +69,26 @@ export function SecurityPanel({ result }: { result: SecurityResult }) {
           Security
         </h2>
         {advisories.length === 0 && (
-          <span className="text-xs text-green-600 dark:text-green-400 font-medium flex items-center gap-1">
-            <Check className="size-3 stroke-[2.5]" />
-            No known vulnerabilities
+          <span className={`text-xs font-medium flex items-center gap-1 ${allSourcesAvailable ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
+            {allSourcesAvailable ? <Check className="size-3 stroke-[2.5]" /> : <AlertTriangle className="size-3" />}
+            {allSourcesAvailable ? "No known vulnerabilities" : "Scan incomplete"}
           </span>
         )}
       </div>
 
       {advisories.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {(["critical", "high", "medium", "low"] as Severity[]).map((sev) =>
-            counts[sev] > 0 ? (
-              <SeverityBadge key={sev} severity={sev} count={counts[sev]} />
-            ) : null
+        <>
+          <div className="flex flex-wrap gap-2">
+            {(["critical", "high", "medium", "low"] as Severity[]).map((sev) =>
+              counts[sev] > 0 ? (
+                <SeverityBadge key={sev} severity={sev} count={counts[sev]} />
+              ) : null
+            )}
+          </div>
+          {!allSourcesAvailable && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">Results may be incomplete because one or more advisory sources were unavailable.</p>
           )}
-        </div>
+        </>
       )}
 
       <div className="space-y-3">
@@ -96,13 +102,15 @@ export function SecurityPanel({ result }: { result: SecurityResult }) {
         {sources.osv && (
           <span className="flex items-center gap-0.5">OSV.dev <Check className="size-2.5 stroke-[2.5]" /></span>
         )}
+        {!sources.osv && <span className="text-amber-600/70 dark:text-amber-400/70">OSV unavailable</span>}
         {sources.ghsa && (
           <span className="flex items-center gap-0.5">GHSA <Check className="size-2.5 stroke-[2.5]" /></span>
         )}
-        {!sources.ghsa && <span className="opacity-60">GHSA (no GITHUB_TOKEN)</span>}
+        {!sources.ghsa && <span className="text-amber-600/70 dark:text-amber-400/70">GHSA unavailable</span>}
         {sources.nvd && (
           <span className="flex items-center gap-0.5">NVD <Check className="size-2.5 stroke-[2.5]" /></span>
         )}
+        {!sources.nvd && <span className="text-amber-600/70 dark:text-amber-400/70">NVD unavailable</span>}
       </div>
     </section>
   );

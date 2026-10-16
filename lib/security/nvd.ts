@@ -2,7 +2,7 @@
 
 import { cacheLife, cacheTag } from "next/cache";
 import type { Advisory, Severity } from "@/lib/types";
-import { cmpSemver } from "./semver";
+import { compareVersions } from "./semver";
 
 interface CpeMatch {
   criteria: string;
@@ -93,7 +93,8 @@ function versionMatchesCpe(version: string, match: CpeMatch): boolean {
 
   // Exact version in CPE string
   if (cpeVer !== "*" && cpeVer !== "-") {
-    if (cpeVer === version) return true;
+    const result = compareVersions(version, cpeVer);
+    if (result === 0 || (result === null && cpeVer === version)) return true;
   }
 
   // Range fields take precedence over CPE version component
@@ -104,10 +105,23 @@ function versionMatchesCpe(version: string, match: CpeMatch): boolean {
     match.versionEndExcluding;
 
   if (hasRange) {
-    if (match.versionStartIncluding && cmpSemver(version, match.versionStartIncluding) < 0) return false;
-    if (match.versionStartExcluding && cmpSemver(version, match.versionStartExcluding) <= 0) return false;
-    if (match.versionEndIncluding && cmpSemver(version, match.versionEndIncluding) > 0) return false;
-    if (match.versionEndExcluding && cmpSemver(version, match.versionEndExcluding) >= 0) return false;
+    const compare = (boundary: string) => compareVersions(version, boundary);
+    if (match.versionStartIncluding) {
+      const result = compare(match.versionStartIncluding);
+      if (result === null || result < 0) return false;
+    }
+    if (match.versionStartExcluding) {
+      const result = compare(match.versionStartExcluding);
+      if (result === null || result <= 0) return false;
+    }
+    if (match.versionEndIncluding) {
+      const result = compare(match.versionEndIncluding);
+      if (result === null || result > 0) return false;
+    }
+    if (match.versionEndExcluding) {
+      const result = compare(match.versionEndExcluding);
+      if (result === null || result >= 0) return false;
+    }
     return true;
   }
 
@@ -154,10 +168,10 @@ export async function queryNvd(
   let data: NvdResponse;
   try {
     const res = await fetch(url, { headers });
-    if (!res.ok) return [];
+    if (!res.ok) throw new Error(`NVD request failed with HTTP ${res.status}`);
     data = (await res.json()) as NvdResponse;
-  } catch {
-    return [];
+  } catch (error) {
+    throw error instanceof Error ? error : new Error("NVD request failed");
   }
 
   return (data.vulnerabilities ?? [])

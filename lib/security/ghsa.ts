@@ -20,6 +20,7 @@ interface GhsaEdge {
 }
 
 interface GhsaResponse {
+  errors?: Array<{ message?: string }>;
   data?: {
     securityVulnerabilities?: {
       edges?: GhsaEdge[];
@@ -29,9 +30,13 @@ interface GhsaResponse {
 
 const ECOSYSTEM_MAP: Record<string, string> = {
   npm: "NPM",
-  PyPI: "PIP",
-  Maven: "MAVEN",
+  pypi: "PIP",
+  maven: "MAVEN",
 };
+
+function ghsaEcosystem(ecosystem: string): string | undefined {
+  return ECOSYSTEM_MAP[ecosystem.toLowerCase()];
+}
 
 function ghsaSeverityToSeverity(s: string): Severity {
   const lower = s.toLowerCase();
@@ -52,10 +57,10 @@ export async function queryGhsa(
   cacheLife("hours");
 
   const token = process.env.GITHUB_TOKEN;
-  if (!token) return [];
+  if (!token) throw new Error("GITHUB_TOKEN is not configured");
 
-  const ghEcosystem = ECOSYSTEM_MAP[ecosystem];
-  if (!ghEcosystem) return [];
+  const ghEcosystem = ghsaEcosystem(ecosystem);
+  if (!ghEcosystem) throw new Error(`GHSA does not support ecosystem: ${ecosystem}`);
 
   const query = `
     query($ecosystem: SecurityAdvisoryEcosystem!, $package: String!) {
@@ -88,10 +93,13 @@ export async function queryGhsa(
       },
       body: JSON.stringify({ query, variables: { ecosystem: ghEcosystem, package: name } }),
     });
-    if (!res.ok) return [];
+    if (!res.ok) throw new Error(`GHSA request failed with HTTP ${res.status}`);
     data = (await res.json()) as GhsaResponse;
-  } catch {
-    return [];
+    if (data.errors?.length) {
+      throw new Error(`GHSA query failed: ${data.errors[0].message ?? "unknown GraphQL error"}`);
+    }
+  } catch (error) {
+    throw error instanceof Error ? error : new Error("GHSA request failed");
   }
 
   const edges = data.data?.securityVulnerabilities?.edges ?? [];

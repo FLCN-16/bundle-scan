@@ -3,6 +3,8 @@ import { parse as parseToml } from "smol-toml";
 export interface ParsedPackage {
   name: string;
   version: string;
+  /** Original manifest constraint, when the file provided a range instead of a pin. */
+  requestedVersion?: string;
   registry: "npm" | "pypi" | "maven";
 }
 
@@ -19,9 +21,10 @@ export function parsePackageJson(content: string): ParsedPackage[] {
     const deps = json[field];
     if (!deps || typeof deps !== "object") continue;
     for (const [name, ver] of Object.entries(deps as Record<string, string>)) {
+      if (typeof ver !== "string") continue;
       // Strip semver range chars to get a plain version; fall back to "latest"
       const cleanVer = ver.replace(/^[\^~>=<*\s]+/, "").split(" ")[0] ?? "latest";
-      result.push({ name, version: cleanVer || "latest", registry: "npm" });
+      result.push({ name, version: cleanVer || "latest", requestedVersion: ver, registry: "npm" });
     }
   }
   return result;
@@ -62,7 +65,7 @@ export function parsePomXml(content: string): ParsedPackage[] {
 
 function parsePypiDepString(dep: string): ParsedPackage | null {
   const line = dep.trim();
-  if (!line || line.toLowerCase().startsWith("python")) return null;
+  if (!line) return null;
   const m = line.match(/^([A-Za-z0-9_.\-]+)(?:\[[^\]]+\])?(?:==|>=|~=|<=|!=|>|<)([^\s,;]+)/);
   if (m) return { name: m[1], version: m[2].split(",")[0], registry: "pypi" };
   const nameOnly = line.match(/^([A-Za-z0-9_.\-]+)/);

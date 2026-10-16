@@ -171,6 +171,18 @@ async function fetchNpmBundleSize(name: string, version: string): Promise<{ min:
   }
 }
 
+async function fetchNpmSecurity(
+  name: string,
+  requestedVersion: string
+): Promise<{ security: SecurityResult; resolvedVersion?: string }> {
+  const params = new URLSearchParams({ name, version: requestedVersion, ecosystem: "npm" });
+  const response = await fetch(`/api/dep-info/npm?${params}`);
+  if (!response.ok) throw new Error(`Security lookup failed (HTTP ${response.status})`);
+  const data = await response.json() as { security?: SecurityResult; resolvedVersion?: string };
+  if (!data.security) throw new Error("Security lookup returned no result");
+  return { security: data.security, resolvedVersion: data.resolvedVersion };
+}
+
 function topSeverity(advisories: Advisory[]): Severity {
   if (!advisories.length) return "unknown";
   return advisories.reduce<Severity>((top, a) => SEV_ORDER[a.severity] < SEV_ORDER[top] ? a.severity : top, "unknown");
@@ -193,6 +205,7 @@ function ScanRow({ entry }: { entry: ScanEntry }) {
   const pkg = entry.pkg;
   const total = entry.result?.advisories.length ?? 0;
   const sev = entry.result ? topSeverity(entry.result.advisories) : null;
+  const complete = entry.result ? entry.result.sources.osv && entry.result.sources.ghsa && entry.result.sources.nvd : false;
 
   return (
     <div className="flex items-center gap-3 py-2.5 border-b border-black/4 dark:border-white/4 last:border-0">
@@ -239,9 +252,9 @@ function ScanRow({ entry }: { entry: ScanEntry }) {
           </span>
         )}
         {entry.status === "done" && total === 0 && (
-          <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium flex items-center justify-end gap-1">
-            <Check className="size-3 stroke-[2.5]" />
-            Clean
+          <span className={`text-xs font-medium flex items-center justify-end gap-1 ${complete ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+            {complete ? <Check className="size-3 stroke-[2.5]" /> : <AlertCircle className="size-3" />}
+            {complete ? "Clean" : "Incomplete"}
           </span>
         )}
         {entry.status === "done" && total > 0 && sev && (
@@ -351,19 +364,27 @@ export function FileScan({
           const idx = queue[next++];
           active++;
           const pkg = packages[idx];
+          const requestedVersion = pkg.requestedVersion ?? pkg.version;
           updateEntry(idx, { status: "scanning" });
 
           // Size and security fire in parallel per package slot
           const sizeP = pkg.registry === "npm"
-            ? fetchNpmBundleSize(pkg.name, pkg.version)
+            ? fetchNpmBundleSize(pkg.name, requestedVersion)
                 .then((s) => updateSize(idx, s))
                 .catch(() => updateSize(idx, null))
             : fetchPackageSize(pkg.name, pkg.registry, pkg.version)
                 .then((s) => updateSize(idx, s ? { min: s.bytes } : null))
                 .catch(() => updateSize(idx, null));
 
-          const secP = fetchSecurity(pkg.name, ECOSYSTEM_MAP[pkg.registry], pkg.version)
-            .then((result) => updateEntry(idx, { status: "done", result }))
+          const secP = (pkg.registry === "npm"
+            ? fetchNpmSecurity(pkg.name, requestedVersion)
+                .then(({ security, resolvedVersion }) => updateEntry(idx, {
+                  status: "done",
+                  result: security,
+                  ...(resolvedVersion ? { pkg: { ...pkg, version: resolvedVersion } } : {}),
+                }))
+            : fetchSecurity(pkg.name, ECOSYSTEM_MAP[pkg.registry], pkg.version)
+                .then((result) => updateEntry(idx, { status: "done", result })))
             .catch((err) => updateEntry(idx, { status: "error", error: err instanceof Error ? err.message : "Error" }));
 
           // Advance queue only when both are done

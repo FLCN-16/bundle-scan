@@ -78,10 +78,11 @@ function SkeletonCell({ width = "w-16" }: { width?: string }) {
 function VulnCell({ security }: { security: SecurityResult }) {
   const advisories = security.advisories;
   if (!advisories.length) {
+    const complete = security.sources.osv && security.sources.ghsa && security.sources.nvd;
     return (
-      <span className="inline-flex items-center gap-1 text-label text-emerald-600 dark:text-emerald-400 font-medium">
-        <Check className="size-3 stroke-[2.5]" />
-        Clean
+      <span className={`inline-flex items-center gap-1 text-label font-medium ${complete ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+        {complete ? <Check className="size-3 stroke-[2.5]" /> : <AlertTriangle className="size-3" />}
+        {complete ? "Clean" : "Incomplete"}
       </span>
     );
   }

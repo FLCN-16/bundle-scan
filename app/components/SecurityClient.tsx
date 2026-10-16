@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check } from "lucide-react";
+import { AlertTriangle, Check } from "lucide-react";
 import { fetchSecurity } from "@/lib/actions/security";
 import type { Advisory, SecurityResult, Severity } from "@/lib/types";
 
@@ -119,22 +119,28 @@ export function SecurityClient({ name, ecosystem, version }: { name: string; eco
     low:      advisories.filter((a) => a.severity === "low").length,
   };
   const total = advisories.length;
+  const allSourcesAvailable = sources.osv && sources.ghsa && sources.nvd;
 
   return (
     <div className="space-y-4">
       {total === 0 ? (
-        <div className="flex items-center gap-2.5 py-1 text-body-sm text-emerald-700 dark:text-emerald-400">
-          <span className="size-6 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center flex-shrink-0">
-            <Check className="size-3.5 stroke-[2.5]" />
+        <div className={`flex items-center gap-2.5 py-1 text-body-sm ${allSourcesAvailable ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}`}>
+          <span className={`size-6 rounded-full ${allSourcesAvailable ? "bg-emerald-500/10 border-emerald-500/20" : "bg-amber-500/10 border-amber-500/20"} border flex items-center justify-center flex-shrink-0`}>
+            {allSourcesAvailable ? <Check className="size-3.5 stroke-[2.5]" /> : <AlertTriangle className="size-3.5 stroke-[2.5]" />}
           </span>
-          No known vulnerabilities for this version
+          {allSourcesAvailable ? "No known vulnerabilities for this version" : "No vulnerabilities found, but the scan is incomplete"}
         </div>
       ) : (
-        <div className="flex flex-wrap gap-2">
-          {(["critical", "high", "medium", "low"] as const).map((sev) =>
-            counts[sev] > 0 ? <SeverityPill key={sev} severity={sev} count={counts[sev]} /> : null
+        <>
+          <div className="flex flex-wrap gap-2">
+            {(["critical", "high", "medium", "low"] as const).map((sev) =>
+              counts[sev] > 0 ? <SeverityPill key={sev} severity={sev} count={counts[sev]} /> : null
+            )}
+          </div>
+          {!allSourcesAvailable && (
+            <p className="text-label text-amber-700 dark:text-amber-400">Results may be incomplete because one or more advisory sources were unavailable.</p>
           )}
-        </div>
+        </>
       )}
 
       <div className="space-y-2.5">
@@ -146,9 +152,11 @@ export function SecurityClient({ name, ecosystem, version }: { name: string; eco
       <div className="flex flex-wrap gap-x-3 gap-y-1 pt-1 text-label text-slate-400 dark:text-slate-500">
         <span className="font-medium">Scanned via</span>
         {sources.osv && <span>OSV.dev</span>}
+        {!sources.osv && <span className="text-amber-600/70 dark:text-amber-400/70">OSV unavailable</span>}
         {sources.ghsa && <span>GitHub Advisory DB</span>}
-        {!sources.ghsa && <span className="opacity-40">GHSA (no token)</span>}
+        {!sources.ghsa && <span className="text-amber-600/70 dark:text-amber-400/70">GHSA unavailable</span>}
         {sources.nvd && <span>NVD</span>}
+        {!sources.nvd && <span className="text-amber-600/70 dark:text-amber-400/70">NVD unavailable</span>}
       </div>
     </div>
   );
