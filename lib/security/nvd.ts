@@ -3,6 +3,7 @@
 import { cacheLife, cacheTag } from "next/cache";
 import type { Advisory, Severity } from "@/lib/types";
 import { compareVersions } from "./semver";
+import { fetchWithRetry } from "../http";
 
 interface CpeMatch {
   criteria: string;
@@ -167,14 +168,15 @@ export async function queryNvd(
 
   let data: NvdResponse;
   try {
-    const res = await fetch(url, { headers });
+    const res = await fetchWithRetry(url, { headers }, { timeoutMs: 12_000 });
     if (!res.ok) throw new Error(`NVD request failed with HTTP ${res.status}`);
     data = (await res.json()) as NvdResponse;
+    if (!data || !Array.isArray(data.vulnerabilities)) throw new Error("NVD response has an invalid schema");
   } catch (error) {
     throw error instanceof Error ? error : new Error("NVD request failed");
   }
 
-  return (data.vulnerabilities ?? [])
+  return data.vulnerabilities
     .map((v) => v.cve)
     .filter((cve) => affectsVersion(cve, name, version))
     .slice(0, 20)

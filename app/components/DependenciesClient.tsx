@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, AlertTriangle, Wrench } from "lucide-react";
 import { useBundleData } from "./BundleDataProvider";
 import type { SecurityResult, Severity } from "@/lib/types";
+import { fetchWithTimeout } from "@/lib/http";
 
 interface DepInfo {
   unpackedSize?: number;
@@ -270,6 +271,9 @@ export function DependenciesClient({
     if (bundleLoading || !bundleResult || processedCompositionRef.current) return;
     if (!bundleResult.ok) return;
     processedCompositionRef.current = true;
+    // The composition arrives asynchronously; this state update is the
+    // synchronization point between the bundle stream and the table.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRows((prev) => {
       const existing = new Set(prev.map((r) => r.name));
       const transitive = bundleResult.composition
@@ -285,54 +289,68 @@ export function DependenciesClient({
   }, [bundleResult, bundleLoading]);
 
   const queueRef = useRef<number[]>([]);
+  const queuedRef = useRef(new Set<number>());
+  const inFlightRef = useRef(new Set<number>());
   const activeRef = useRef(0);
   const mountedRef = useRef(true);
   const rowsRef = useRef<DepRow[]>(rows);
-  rowsRef.current = rows;
 
-  const updateRow = (idx: number, patch: Partial<DepRow>) => {
+  const updateRow = useCallback((idx: number, patch: Partial<DepRow>) => {
     setRows((prev) => {
       const next = [...prev];
       next[idx] = { ...next[idx], ...patch };
       return next;
     });
-  };
+  }, []);
 
   // Stored in a ref so .finally() callbacks always drain the shared queue.
   const processNextRef = useRef<() => void>(null!);
-  processNextRef.current = () => {
-    while (activeRef.current < CONCURRENCY && queueRef.current.length > 0) {
-      const idx = queueRef.current.shift()!;
-      const row = rowsRef.current[idx];
-      if (!row) continue;
-      activeRef.current++;
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
 
-      updateRow(idx, { state: "loading" });
+  useEffect(() => {
+    processNextRef.current = () => {
+      while (activeRef.current < CONCURRENCY && queueRef.current.length > 0) {
+        const idx = queueRef.current.shift()!;
+        queuedRef.current.delete(idx);
+        const row = rowsRef.current[idx];
+        if (!row || row.state !== "pending" || inFlightRef.current.has(idx)) continue;
+        inFlightRef.current.add(idx);
+        activeRef.current++;
 
-      const params = new URLSearchParams({ name: row.name, version: row.transitive ? "*" : row.range, ecosystem });
-      fetch(`/api/dep-info/npm?${params}`)
-        .then((r) => (r.ok ? r.json() : Promise.reject()))
-        .then((data: DepInfo) => {
-          if (!mountedRef.current) return;
-          updateRow(idx, { state: "done", info: data });
-        })
-        .catch(() => {
-          if (!mountedRef.current) return;
-          updateRow(idx, { state: "error" });
-        })
-        .finally(() => {
-          if (!mountedRef.current) return;
-          activeRef.current--;
-          processNextRef.current();
-        });
-    }
-  };
+        updateRow(idx, { state: "loading" });
+
+        const requestedVersion = row.transitive ? row.info?.resolvedVersion ?? "*" : row.range;
+        const params = new URLSearchParams({ name: row.name, version: requestedVersion, ecosystem });
+        fetchWithTimeout(`/api/dep-info/npm?${params}`, {}, 20_000)
+          .then((r) => (r.ok ? r.json() : Promise.reject()))
+          .then((data: DepInfo) => {
+            if (!mountedRef.current) return;
+            updateRow(idx, { state: "done", info: data });
+          })
+          .catch(() => {
+            if (!mountedRef.current) return;
+            updateRow(idx, { state: "error" });
+          })
+          .finally(() => {
+            activeRef.current--;
+            inFlightRef.current.delete(idx);
+            if (!mountedRef.current) return;
+            processNextRef.current();
+          });
+      }
+    };
+  }, [ecosystem, updateRow]);
 
   // Push newly pending rows onto the shared queue and kick off processing.
   useEffect(() => {
     if (!mountedRef.current) return;
     const pendingIdxs = rows.reduce<number[]>((acc, r, i) => {
-      if (r.state === "pending") acc.push(i);
+      if (r.state === "pending" && !queuedRef.current.has(i) && !inFlightRef.current.has(i)) {
+        queuedRef.current.add(i);
+        acc.push(i);
+      }
       return acc;
     }, []);
     if (!pendingIdxs.length) return;
@@ -352,6 +370,11 @@ export function DependenciesClient({
   const transitiveCount = rows.filter((r) => r.transitive).length;
   const doneCount = rows.filter((r) => r.state === "done" || r.state === "error").length;
   const vulnCount = rows.reduce((n, r) => n + (r.info?.security?.advisories.length ?? 0), 0);
+  const incompleteCount = rows.filter((r) => {
+    if (r.state === "error") return true;
+    const sources = r.info?.security?.sources;
+    return r.state === "done" && (!sources || !sources.osv || !sources.ghsa || !sources.nvd);
+  }).length;
   const fixCount = rows.reduce(
     (n, r) => n + (r.info?.security?.advisories.filter((a) => a.fixedVersions.length > 0).length ?? 0),
     0,
@@ -381,12 +404,19 @@ export function DependenciesClient({
                 · {fixCount} fixable
               </span>
             )}
+            {incompleteCount > 0 && <span className="ml-1 text-amber-600 dark:text-amber-400">· scan incomplete</span>}
           </span>
         )}
-        {doneCount === rows.length && rows.length > 0 && vulnCount === 0 && (
+        {doneCount === rows.length && rows.length > 0 && vulnCount === 0 && incompleteCount === 0 && (
           <span className="inline-flex items-center gap-1 text-label font-semibold text-emerald-600 dark:text-emerald-400">
             <Check className="size-3 stroke-[2.5]" />
             All clean
+          </span>
+        )}
+        {doneCount === rows.length && rows.length > 0 && vulnCount === 0 && incompleteCount > 0 && (
+          <span className="inline-flex items-center gap-1 text-label font-semibold text-amber-600 dark:text-amber-400">
+            <AlertTriangle className="size-3" />
+            Scan incomplete ({incompleteCount} unavailable)
           </span>
         )}
       </div>

@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import type { BundleResponse } from "@/lib/types";
+import { fetchWithTimeout } from "@/lib/http";
 
 export type BundlePhase = "idle" | "installing" | "bundling" | "done";
 
@@ -45,12 +46,12 @@ export function BundleDataProvider({
 
     (async () => {
       try {
-        const response = await fetch("/api/bundle/npm", {
+        const response = await fetchWithTimeout("/api/bundle/npm", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name, version }),
           signal: controller.signal,
-        });
+        }, 70_000);
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         if (!response.body) throw new Error("No response body");

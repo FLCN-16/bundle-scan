@@ -2,6 +2,7 @@
 
 import { cacheLife, cacheTag } from "next/cache";
 import type { Advisory, Severity } from "@/lib/types";
+import { fetchWithRetry } from "../http";
 
 interface OsvVuln {
   id: string;
@@ -120,13 +121,14 @@ export async function queryOsv(
   const body = { version, package: { name, ecosystem } };
   let data: OsvResponse;
   try {
-    const res = await fetch("https://api.osv.dev/v1/query", {
+    const res = await fetchWithRetry("https://api.osv.dev/v1/query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    });
+    }, { timeoutMs: 8_000 });
     if (!res.ok) throw new Error(`OSV request failed with HTTP ${res.status}`);
     data = (await res.json()) as OsvResponse;
+    if (!data || !Array.isArray(data.vulns)) throw new Error("OSV response has an invalid schema");
   } catch (error) {
     throw error instanceof Error ? error : new Error("OSV request failed");
   }

@@ -35,6 +35,11 @@ describe("OSV provider", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 503 }));
     await expect(queryOsv("requested", "npm", "1.0.0")).rejects.toThrow("HTTP 503");
   });
+
+  it("rejects a successful response with an invalid schema", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    await expect(queryOsv("requested", "npm", "1.0.0")).rejects.toThrow("invalid schema");
+  });
 });
 
 describe("GitHub Advisory provider", () => {

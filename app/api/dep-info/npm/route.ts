@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aggregateSecurity } from "@/lib/security/aggregate";
+import { fetchWithRetry } from "@/lib/http";
 import { cmpSemver, compareVersions, versionInRange } from "@/lib/security/semver";
 
 function cleanVersion(range: string): string {
@@ -32,9 +33,10 @@ async function fetchBundlephobia(
   version: string
 ): Promise<{ minified?: number; gzipSize?: number }> {
   try {
-    const res = await fetch(
+    const res = await fetchWithRetry(
       `https://bundlephobia.com/api/size?package=${encodeURIComponent(name)}@${encodeURIComponent(version)}`,
-      { headers: { Accept: "application/json" }, next: { revalidate: 86400 } }
+      { headers: { Accept: "application/json" }, next: { revalidate: 86400 } },
+      { timeoutMs: 8_000 },
     );
     if (!res.ok) return {};
     const data = await res.json() as { size?: number; gzip?: number };
@@ -52,9 +54,10 @@ async function fetchNpmMeta(
   const encoded = npmPath(name);
 
   const tryFetch = async (v: string) => {
-    const res = await fetch(
+    const res = await fetchWithRetry(
       `https://registry.npmjs.org/${encoded}/${encodeURIComponent(v)}`,
-      { headers: { Accept: "application/json" }, next: { revalidate: 86400 } }
+      { headers: { Accept: "application/json" }, next: { revalidate: 86400 } },
+      { timeoutMs: 8_000 },
     );
     if (!res.ok) return null;
     return res.json() as Promise<{ version: string; dist?: { unpackedSize?: number } }>;
@@ -68,9 +71,10 @@ async function fetchNpmMeta(
   // registry's published versions before looking up security advisories so a
   // lower bound such as ^4.17.20 is not scanned as 4.17.20.
   if (!data && rangeLike) {
-    const res = await fetch(
+    const res = await fetchWithRetry(
       `https://registry.npmjs.org/${encoded}`,
-      { headers: { Accept: "application/json" }, next: { revalidate: 86400 } }
+      { headers: { Accept: "application/json" }, next: { revalidate: 86400 } },
+      { timeoutMs: 12_000 },
     );
     if (!res.ok) throw new Error(`npm: unable to resolve range ${name}@${version} (HTTP ${res.status})`);
     const packument = await res.json() as {
@@ -110,10 +114,14 @@ export async function GET(request: NextRequest) {
 
   try {
     const secVersion = cleanVersion(version);
-    const npmMeta = ecosystem === "npm"
-      ? await fetchNpmMeta(name, version)
-      : { resolvedVersion: secVersion };
-    const security = await aggregateSecurity(name, ecosystem, npmMeta.resolvedVersion || secVersion);
+    const concreteSecurity = ecosystem === "npm" && isConcreteVersion(secVersion)
+      ? aggregateSecurity(name, ecosystem, secVersion)
+      : null;
+    const [npmMeta, earlySecurity] = await Promise.all([
+      ecosystem === "npm" ? fetchNpmMeta(name, version) : Promise.resolve({ resolvedVersion: secVersion }),
+      concreteSecurity ?? Promise.resolve(null),
+    ]);
+    const security = earlySecurity ?? await aggregateSecurity(name, ecosystem, npmMeta.resolvedVersion || secVersion);
 
     return NextResponse.json({ ...npmMeta, security });
   } catch (err: unknown) {

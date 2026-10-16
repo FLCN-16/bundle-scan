@@ -3,6 +3,7 @@
 import { cacheLife, cacheTag } from "next/cache";
 import type { Advisory, Severity } from "@/lib/types";
 import { versionInRange } from "./semver";
+import { fetchWithRetry } from "../http";
 
 interface GhsaEdge {
   node: {
@@ -85,24 +86,27 @@ export async function queryGhsa(
 
   let data: GhsaResponse;
   try {
-    const res = await fetch("https://api.github.com/graphql", {
+    const res = await fetchWithRetry("https://api.github.com/graphql", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ query, variables: { ecosystem: ghEcosystem, package: name } }),
-    });
+    }, { timeoutMs: 8_000 });
     if (!res.ok) throw new Error(`GHSA request failed with HTTP ${res.status}`);
     data = (await res.json()) as GhsaResponse;
     if (data.errors?.length) {
       throw new Error(`GHSA query failed: ${data.errors[0].message ?? "unknown GraphQL error"}`);
     }
+    if (!data.data?.securityVulnerabilities || !Array.isArray(data.data.securityVulnerabilities.edges)) {
+      throw new Error("GHSA response has an invalid schema");
+    }
   } catch (error) {
     throw error instanceof Error ? error : new Error("GHSA request failed");
   }
 
-  const edges = data.data?.securityVulnerabilities?.edges ?? [];
+  const edges = data.data.securityVulnerabilities.edges;
 
   return edges
     .filter((e) => {
